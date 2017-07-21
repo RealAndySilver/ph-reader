@@ -1,59 +1,46 @@
 var MongoClient = require('mongodb').MongoClient;
 var url = 'mongodb://localhost:27017/test';
-var request = require('request');
-var socket = null;//require('socket.io-client')('http://localhost:3000');
-var global_db;
-//Create Indexes
-MongoClient.connect(url, (err, db) => {
-    if (err) return console.log(err)
-    global_db = db;
-});
 
-var log = { upload : {}, insert : {} };
+var time_to_update = true;
+var last_updated_minute = 0;
+var first_time_to_update = true;
+
+var socket_expiration_date = null;
+var is_socket_open = false;
+var expiration_time_in_milliseconds = 70000;//70 seconds
+
 var giant_copy = {};
-if(socket){
-	socket.on('Current', function(data){
-		giant_copy = {};
-		giant_copy = data.current;
-	});
-}
+var busy = false;
+var giant_array = [];
 
-var router = function (app, io) {
-    
+var router = function (app) {
+
     app.get('/mongo-api/get/:tag_list/:start_date/:end_date/:variable?', function (req, res) {
 	    MongoClient.connect(url, (err, db) => {
+		    if(err){
+			    return res.send({status:false, error:err});
+		    }
+		    
 		    let start = new Date(req.params.start_date);
-		    let variable = req.params.variable || 'PV';
-		    start.setSeconds(0);
-		    start.setMilliseconds(0);
-		    //start = start.toISOString();
 		    let end = new Date(req.params.end_date);
-		    end.setSeconds(0);
-		    end.setMilliseconds(0);
+		    let find_query = {};
+		    let fields_to_show = {};
+		    let variable = req.params.variable || 'PV';
 		    let tag_list = req.params.tag_list.split(',').map(function(item){
 			    item = item + ":" + variable + ":";
 			    return new RegExp("\^"+item);
 			});
-	        db.collection("past").find({ 
-			    _id: {
-			        $in:tag_list,
-			    }, 
-			    date: {
-			        $gte: start,
-			        $lte: end
-			    }
-			}, {_id:0}).toArray(function(err, arr){
-				db.collection("current").find({ 
-				    _id: {
-				        $in:tag_list,
-				    }, 
-				    date: {
-				        $gte: start,
-				        $lte: end
-				    }
-				}, {_id:0}).toArray(function(err2, arr2){
-					let data;
-					let current = [];
+			
+			start.setSeconds(0);
+		    start.setMilliseconds(0);		    
+		    end.setSeconds(0);
+		    end.setMilliseconds(0);
+			
+			find_query = { _id: { $in:tag_list}, date: { $gte: start, $lte: end } };
+			fields_to_show = {_id:0};
+			
+	        db.collection("past").find(find_query, fields_to_show).toArray(function(err, arr){
+				db.collection("current").find(find_query, fields_to_show).toArray(function(err2, arr2){
 					if(err || arr.length < 1){
 						arr = [];
 					}
@@ -69,35 +56,28 @@ var router = function (app, io) {
     
     app.get('/mongo-api/getAllFromTagList/:tag_list/:start_date/:end_date', function (req, res) {
 	    MongoClient.connect(url, (err, db) => {
+		    if(err){
+			    return res.send({status:false, error:err});
+		    }
 		    let start = new Date(req.params.start_date);
-		    start.setSeconds(0);
-		    start.setMilliseconds(0);
-		    //start = start.toISOString();
 		    let end = new Date(req.params.end_date);
-		    end.setSeconds(0);
-		    end.setMilliseconds(0);
+		    let find_query = {};
+		    let fields_to_show = {};
 		    let tag_list = req.params.tag_list.split(',').map(function(item){
 			    item = item + ":";
 			    return new RegExp("\^"+item);
-			})
-	        db.collection("past").find({ 
-			    _id: {
-			        $in:tag_list,
-			    }, 
-			    date: {
-			        $gte: start,
-			        $lte: end
-			    }
-			}, {_id:0}).toArray(function(err, arr){
-				db.collection("current").find({ 
-				    _id: {
-				        $in:tag_list,
-				    }, 
-				    date: {
-				        $gte: start,
-				        $lte: end
-				    }
-				}, {_id:0}).toArray(function(err2, arr2){
+			});
+		    
+		    start.setSeconds(0);
+		    start.setMilliseconds(0);
+		    end.setSeconds(0);
+		    end.setMilliseconds(0);
+		    
+			find_query = { _id: { $in:tag_list}, date: { $gte: start, $lte: end } };
+			fields_to_show = {_id:0};
+			
+	        db.collection("past").find(find_query, fields_to_show).toArray(function(err, arr){
+				db.collection("current").find(find_query, fields_to_show).toArray(function(err2, arr2){
 					let data;
 					let current = [];
 					if(err || arr.length < 1){
@@ -109,6 +89,20 @@ var router = function (app, io) {
 					res.json({data:arr.concat(arr2), current:getCurrent(giant_copy, req.params.tag_list, req.params.variable)});
 					db.close();
 				});
+			});
+		});
+    });
+    
+    app.get('/mongo-api/getLatest/:tag_list/:variable', function (req, res) {
+	    MongoClient.connect(url, (err, db) => {
+		    let variable = req.params.variable || 'PV';
+		    let tag_list = req.params.tag_list.split(',').map(function(item){
+			    item = item + ":" + variable + ":";
+			    return new RegExp("\^"+item);
+			})
+	        db.collection("current").find({ _id:{ $in:tag_list }}).limit(tag_list.length*2).sort({date:-1}).toArray(function(err, arr){
+				res.json({data:arr, current:getCurrent(giant_copy, req.params.tag_list, req.params.variable)});
+				db.close();
 			});
 		});
     });
@@ -161,20 +155,19 @@ var getCurrent = function(current_object, tag_list, variable){
 			giant_copy[item].tag = item;
 			keys.forEach(function(key){
 				let split_key = key.split(".");
-				final_obj.date = giant_copy[item].date;
-				final_obj.tag = giant_copy[item].tag;
-				final_obj.var = giant_copy[item].var;
+				let obj = giant_copy[item];
+				final_obj.date = obj.date;
+				final_obj.tag = obj.tag;
+				final_obj.var = obj.var;
 				if(!final_obj.data[split_key[1]]){
 					final_obj.data[split_key[1]] = {};
 				}
-				final_obj.data[split_key[1]][split_key[2]] = giant_copy[item].data[key];
+				final_obj.data[split_key[1]][split_key[2]] = obj.data[key];
 			});
 			current.push(final_obj);
 		}
 	});
 	return current;
 }
-
-
 
 module.exports = router;
