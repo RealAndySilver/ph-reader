@@ -1,9 +1,7 @@
 const express = require('express');
-var path = require('path');
 var bodyParser = require("body-parser");
 const app = express();
 const server = require('http').Server(app);
-const io = require('socket.io')(server);
 const port = process.env.PORT || 3001;
 
 var allowCrossDomain = function(req, res, next) {
@@ -24,7 +22,7 @@ app.use(allowCrossDomain);
 app.use(bodyParser.json({limit: '50mb'}));
 app.use(bodyParser.urlencoded({limit: '50mb', extended: true }));
 
-var reader = require("./reader.js")(app,io);
+var reader = require("./reader.js")(app);
 server.listen(port, () => console.log('listening on port ' + port));
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
