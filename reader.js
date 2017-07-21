@@ -5,10 +5,6 @@ var time_to_update = true;
 var last_updated_minute = 0;
 var first_time_to_update = true;
 
-var socket_expiration_date = null;
-var is_socket_open = false;
-var expiration_time_in_milliseconds = 70000;//70 seconds
-
 var giant_copy = {};
 var busy = false;
 var giant_array = [];
