@@ -1,5 +1,6 @@
 const express = require('express');
 var bodyParser = require("body-parser");
+var path = require('path');
 const app = express();
 const server = require('http').Server(app);
 const port = process.env.PORT || 3001;
@@ -21,7 +22,7 @@ app.use(allowCrossDomain);
 
 app.use(bodyParser.json({limit: '50mb'}));
 app.use(bodyParser.urlencoded({limit: '50mb', extended: true }));
-
+app.use('/data', express.static(path.join(__dirname, '/../data')));
 var reader = require("./reader.js")(app);
 server.listen(port, () => console.log('listening on port ' + port));
 
